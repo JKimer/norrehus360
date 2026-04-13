@@ -26,6 +26,58 @@ canvas { display: block; }
 }
 #sidebar .subtitle { padding: 0 16px 12px; font-size: 11px; color: #999; }
 
+/* Tab buttons in sidebar */
+#sidebar-tabs {
+  display: flex; border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+.sidebar-tab {
+  flex: 1; padding: 10px 8px; text-align: center; cursor: pointer;
+  font-size: 12px; font-weight: 600; color: #888; background: none; border: none;
+  border-bottom: 2px solid transparent; transition: all 0.2s;
+}
+.sidebar-tab:hover { color: #ccc; background: rgba(255,255,255,0.03); }
+.sidebar-tab.active { color: #8ecae6; border-bottom-color: #8ecae6; }
+
+#tab-list, #tab-map { display: none; }
+#tab-list.active, #tab-map.active { display: block; }
+
+/* Map overview */
+#overview-map {
+  position: relative; width: 100%; cursor: pointer;
+  background: #111;
+}
+#overview-map img {
+  width: 100%; display: block;
+}
+.map-marker {
+  position: absolute; transform: translate(-50%, -50%);
+  width: 18px; height: 18px; border-radius: 50%;
+  background: rgba(255, 80, 80, 0.85); border: 2px solid #fff;
+  cursor: pointer; transition: all 0.15s; z-index: 2;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 7px; font-weight: 700; color: #fff;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.5);
+}
+.map-marker:hover {
+  transform: translate(-50%, -50%) scale(1.4);
+  background: rgba(142, 202, 230, 0.95);
+  z-index: 3;
+}
+.map-marker.active {
+  background: rgba(142, 202, 230, 0.95);
+  transform: translate(-50%, -50%) scale(1.3);
+  box-shadow: 0 0 8px rgba(142, 202, 230, 0.6);
+  z-index: 3;
+}
+.map-marker .marker-tooltip {
+  display: none; position: absolute; bottom: 100%; left: 50%;
+  transform: translateX(-50%); white-space: nowrap;
+  background: rgba(0,0,0,0.85); color: #fff; padding: 3px 8px;
+  border-radius: 3px; font-size: 11px; margin-bottom: 4px;
+  pointer-events: none;
+}
+.map-marker:hover .marker-tooltip { display: block; }
+
 .pos-group { margin-bottom: 2px; }
 .pos-header {
   display: flex; align-items: center; padding: 8px 16px; cursor: pointer;
@@ -94,7 +146,18 @@ canvas { display: block; }
 <div id="sidebar">
   <h2>EF Nørrehus</h2>
   <div class="subtitle">Fotoorientering – Tagetageplan · 63 positioner · 114 billeder</div>
-  <div id="pos-list"></div>
+  <div id="sidebar-tabs">
+    <button class="sidebar-tab active" onclick="switchTab('map')">Oversigtskort</button>
+    <button class="sidebar-tab" onclick="switchTab('list')">Positionsliste</button>
+  </div>
+  <div id="tab-map" class="active">
+    <div id="overview-map">
+      <img src="overview.jpg" alt="Tagetageplan oversigt">
+    </div>
+  </div>
+  <div id="tab-list">
+    <div id="pos-list"></div>
+  </div>
 </div>
 
 <button id="toggle-sidebar" onclick="toggleSidebar()">☰</button>
@@ -119,6 +182,31 @@ canvas { display: block; }
 <div id="hint">Træk med musen for at panorere · Scroll for zoom</div>
 
 <script>
+// Position markers from PDF annotations
+const positionMarkers = [
+  {pos:1,x:69.76,y:54.54},{pos:2,x:74.84,y:54.58},{pos:3,x:71.91,y:52.51},
+  {pos:4,x:72.69,y:49.69},{pos:5,x:69.51,y:40.97},{pos:6,x:75.34,y:40.95},
+  {pos:7,x:72.38,y:44.86},{pos:8,x:72.22,y:66.25},{pos:9,x:72.27,y:60.43},
+  {pos:10,x:71.97,y:56.39},{pos:11,x:72.23,y:38.69},{pos:12,x:72.01,y:34.67},
+  {pos:13,x:73.78,y:24.96},{pos:14,x:71.62,y:26.87},{pos:15,x:72.14,y:30.2},
+  {pos:16,x:71.8,y:22.86},{pos:17,x:71.91,y:18.82},{pos:18,x:73.96,y:8.08},
+  {pos:19,x:71.34,y:12.09},{pos:20,x:66.04,y:8.96},{pos:21,x:62.41,y:8.61},
+  {pos:22,x:56.36,y:8.53},{pos:23,x:49.39,y:9.19},{pos:24,x:37.56,y:8.52},
+  {pos:25,x:43.65,y:8.69},{pos:26,x:33.07,y:8.93},{pos:27,x:34.79,y:13.86},
+  {pos:28,x:35.03,y:21.12},{pos:29,x:35.13,y:23.13},{pos:30,x:35.02,y:25.17},
+  {pos:31,x:34.7,y:29.58},{pos:32,x:34.4,y:34.47},{pos:33,x:34.43,y:39.06},
+  {pos:34,x:34.43,y:40.76},{pos:35,x:33.75,y:44.62},{pos:36,x:33.7,y:50.38},
+  {pos:37,x:33.18,y:54.53},{pos:38,x:56.45,y:34.55},{pos:39,x:32.55,y:60.44},
+  {pos:40,x:55.77,y:42.81},{pos:41,x:31.67,y:70.2},{pos:42,x:55.61,y:50.3},
+  {pos:43,x:31.11,y:76.18},{pos:44,x:65.4,y:49.84},{pos:45,x:29.7,y:85.81},
+  {pos:46,x:54.6,y:65.93},{pos:47,x:34.05,y:90.59},{pos:48,x:58.52,y:71.2},
+  {pos:49,x:47.74,y:88.23},{pos:50,x:61.54,y:74.16},{pos:51,x:40.13,y:90.13},
+  {pos:52,x:65.15,y:77.56},{pos:53,x:58.39,y:86.67},{pos:54,x:67.15,y:80.87},
+  {pos:55,x:63.63,y:87.56},{pos:56,x:72.68,y:83.7},{pos:57,x:61.22,y:85.14},
+  {pos:58,x:72.77,y:85.5},{pos:59,x:68.94,y:83.02},{pos:60,x:71.59,y:81.95},
+  {pos:61,x:72.03,y:75.15},{pos:62,x:72.45,y:72.09},{pos:63,x:69.26,y:77.98}
+];
+
 // Image data
 const imageData = [
   {pos:1, files:["Pos1.jpg"]},
@@ -200,6 +288,40 @@ let onPointerDownX = 0, onPointerDownY = 0;
 let phi = 0, theta = 0;
 let fov = 75;
 
+// Tab switching
+function switchTab(tab) {
+  document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+  document.getElementById('tab-list').classList.remove('active');
+  document.getElementById('tab-map').classList.remove('active');
+  if (tab === 'map') {
+    document.getElementById('tab-map').classList.add('active');
+    document.querySelectorAll('.sidebar-tab')[0].classList.add('active');
+  } else {
+    document.getElementById('tab-list').classList.add('active');
+    document.querySelectorAll('.sidebar-tab')[1].classList.add('active');
+  }
+}
+
+// Build overview map markers
+function buildOverviewMap() {
+  const mapDiv = document.getElementById('overview-map');
+  positionMarkers.forEach(m => {
+    const marker = document.createElement('div');
+    marker.className = 'map-marker';
+    marker.dataset.pos = m.pos;
+    marker.style.left = m.x + '%';
+    marker.style.top = m.y + '%';
+    marker.textContent = m.pos;
+    marker.innerHTML = `${m.pos}<span class="marker-tooltip">Position ${m.pos}</span>`;
+    marker.onclick = (e) => {
+      e.stopPropagation();
+      const idx = allImages.findIndex(i => i.pos === m.pos);
+      if (idx >= 0) loadImage(idx);
+    };
+    mapDiv.appendChild(marker);
+  });
+}
+
 // Three.js setup
 function init() {
   const container = document.getElementById('viewer');
@@ -214,7 +336,7 @@ function init() {
 
   // Create sphere geometry (inverted for inside view)
   const geometry = new THREE.SphereGeometry(500, 60, 40);
-  geometry.scale(-1, 1, 1); // Invert for inside
+  geometry.scale(-1, 1, 1);
 
   sphereMaterial = new THREE.MeshBasicMaterial({ color: 0x222222 });
   sphere = new THREE.Mesh(geometry, sphereMaterial);
@@ -227,21 +349,18 @@ function init() {
   canvas.addEventListener('pointerup', onPointerUp);
   canvas.addEventListener('wheel', onWheel, { passive: false });
 
-  // Touch
   canvas.addEventListener('touchstart', onTouchStart, { passive: false });
   canvas.addEventListener('touchmove', onTouchMove, { passive: false });
   canvas.addEventListener('touchend', onTouchEnd);
 
   window.addEventListener('resize', onResize);
-
-  // Keyboard
   document.addEventListener('keydown', onKeyDown);
 
   buildSidebar();
+  buildOverviewMap();
   loadImage(0);
   animate();
 
-  // Hide hint after 3s
   setTimeout(() => { document.getElementById('hint').style.opacity = '0'; }, 3000);
 }
 
@@ -327,7 +446,6 @@ function loadImage(index) {
     sphereMaterial.needsUpdate = true;
     loading.style.display = 'none';
 
-    // Reset view
     lon = 0; lat = 0; fov = 75;
     camera.fov = fov;
     camera.updateProjectionMatrix();
@@ -341,7 +459,7 @@ function loadImage(index) {
   document.getElementById('info-file').textContent = img.file;
   document.getElementById('info-count').textContent = `${index + 1} / ${allImages.length}`;
 
-  // Update sidebar active states
+  // Update sidebar list active states
   document.querySelectorAll('.pos-header.active').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.pos-img-btn.active').forEach(el => el.classList.remove('active'));
   const posHeader = document.querySelector(`[data-pos="${img.pos}"]`);
@@ -353,7 +471,14 @@ function loadImage(index) {
       const btn = imgsDiv.querySelector(`[data-file="${img.file}"]`);
       if (btn) btn.classList.add('active');
     }
-    posHeader.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+
+  // Update map marker active states
+  document.querySelectorAll('.map-marker.active').forEach(el => el.classList.remove('active'));
+  const activeMarker = document.querySelector(`.map-marker[data-pos="${img.pos}"]`);
+  if (activeMarker) {
+    activeMarker.classList.add('active');
+    activeMarker.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 }
 
@@ -376,10 +501,8 @@ function buildSidebar() {
     header.dataset.pos = p.pos;
     header.innerHTML = `<span>📍 Position ${p.pos}</span><span class="count">${p.files.length} foto${p.files.length > 1 ? 's' : ''}</span>`;
     header.onclick = () => {
-      // Load first image of this position
       const idx = allImages.findIndex(i => i.pos === p.pos);
       if (idx >= 0) loadImage(idx);
-      // Toggle sub-list
       const imgsDiv = header.nextElementSibling;
       imgsDiv.classList.toggle('open');
     };
