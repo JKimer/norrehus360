@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="da">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Fotoorientering – EF Nørrehus Tagetageplan</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #1a1a2e; color: #fff; overflow: hidden; height: 100vh; }
+
+#viewer { width: 100%; height: 100vh; position: relative; }
+canvas { display: block; }
+
+#sidebar {
+  position: fixed; left: 0; top: 0; bottom: 0; width: 260px;
+  background: rgba(20, 20, 40, 0.95); backdrop-filter: blur(10px);
+  overflow-y: auto; z-index: 10; border-right: 1px solid rgba(255,255,255,0.1);
+  transition: transform 0.3s;
+}
+#sidebar.hidden { transform: translateX(-260px); }
+
+#sidebar h2 {
+  padding: 16px 16px 8px; font-size: 15px; color: #8ecae6;
+  border-bottom: 1px solid rgba(255,255,255,0.1); margin-bottom: 4px;
+}
+#sidebar .subtitle { padding: 0 16px 12px; font-size: 11px; color: #999; }
+
+.pos-group { margin-bottom: 2px; }
+.pos-header {
+  display: flex; align-items: center; padding: 8px 16px; cursor: pointer;
+  font-size: 13px; font-weight: 600; color: #ccc;
+  transition: background 0.2s;
+}
+.pos-header:hover { background: rgba(255,255,255,0.08); }
+.pos-header.active { background: rgba(142, 202, 230, 0.2); color: #8ecae6; }
+.pos-header .count { margin-left: auto; font-size: 10px; color: #666; font-weight: 400; }
+
+.pos-imgs { display: none; padding-left: 16px; }
+.pos-imgs.open { display: block; }
+.pos-img-btn {
+  display: block; width: 100%; text-align: left; background: none; border: none;
+  color: #aaa; padding: 5px 16px; font-size: 12px; cursor: pointer;
+  transition: background 0.2s;
+}
+.pos-img-btn:hover { background: rgba(255,255,255,0.05); color: #fff; }
+.pos-img-btn.active { color: #8ecae6; background: rgba(142, 202, 230, 0.1); }
+
+#toggle-sidebar {
+  position: fixed; left: 260px; top: 12px; z-index: 11;
+  background: rgba(20, 20, 40, 0.9); border: 1px solid rgba(255,255,255,0.15);
+  color: #fff; padding: 6px 10px; border-radius: 4px; cursor: pointer;
+  font-size: 18px; transition: left 0.3s;
+}
+#toggle-sidebar.shifted { left: 8px; }
+
+#info-bar {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 10;
+  background: rgba(20, 20, 40, 0.9); backdrop-filter: blur(10px);
+  padding: 10px 20px; display: flex; align-items: center; gap: 16px;
+  border-top: 1px solid rgba(255,255,255,0.1); font-size: 13px;
+}
+#info-bar .label { color: #8ecae6; font-weight: 600; }
+#info-bar .detail { color: #ccc; }
+
+#nav-btns { display: flex; gap: 6px; margin-left: auto; }
+#nav-btns button {
+  background: rgba(142, 202, 230, 0.15); border: 1px solid rgba(142, 202, 230, 0.3);
+  color: #8ecae6; padding: 5px 14px; border-radius: 4px; cursor: pointer;
+  font-size: 13px; font-weight: 600;
+}
+#nav-btns button:hover { background: rgba(142, 202, 230, 0.3); }
+
+#loading {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 20; text-align: center; color: #8ecae6;
+}
+#loading .spinner {
+  width: 40px; height: 40px; border: 3px solid rgba(142, 202, 230, 0.2);
+  border-top-color: #8ecae6; border-radius: 50%; animation: spin 0.8s linear infinite;
+  margin: 0 auto 12px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#hint {
+  position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  z-index: 5; color: rgba(255,255,255,0.3); font-size: 14px; pointer-events: none;
+  text-align: center; transition: opacity 1s;
+}
+</style>
+</head>
+<body>
+
+<div id="sidebar">
+  <h2>EF Nørrehus</h2>
+  <div class="subtitle">Fotoorientering – Tagetageplan · 63 positioner · 114 billeder</div>
+  <div id="pos-list"></div>
+</div>
+
+<button id="toggle-sidebar" onclick="toggleSidebar()">☰</button>
+
+<div id="viewer"></div>
+
+<div id="info-bar">
+  <span class="label" id="info-pos">Position 1</span>
+  <span class="detail" id="info-file">Pos1.jpg</span>
+  <span class="detail" id="info-count">1 / 114</span>
+  <div id="nav-btns">
+    <button onclick="prevImage()">◀ Forrige</button>
+    <button onclick="nextImage()">Næste ▶</button>
+  </div>
+</div>
+
+<div id="loading" style="display:none">
+  <div class="spinner"></div>
+  <div>Indlæser panorama...</div>
+</div>
+
+<div id="hint">Træk med musen for at panorere · Scroll for zoom</div>
+
+<script>
+// Image data
+const imageData = [
+  {pos:1, files:["Pos1.jpg"]},
+  {pos:2, files:["Pos2.jpg"]},
+  {pos:3, files:["Pos3_0.jpg","Pos3_1.jpg"]},
+  {pos:4, files:["Pos4_0.jpg","Pos4_1.jpg"]},
+  {pos:5, files:["Pos5.jpg"]},
+  {pos:6, files:["Pos6.jpg"]},
+  {pos:7, files:["Pos7_0.jpg","Pos7_1.jpg","Pos7_2.jpg"]},
+  {pos:8, files:["Pos8_0.jpg","Pos8_1.jpg","Pos8_2.jpg"]},
+  {pos:9, files:["Pos9_0.jpg","Pos9_1.jpg","Pos9_2.jpg"]},
+  {pos:10, files:["Pos10.jpg"]},
+  {pos:11, files:["Pos11_0.jpg","Pos11_1.jpg"]},
+  {pos:12, files:["Pos12.jpg"]},
+  {pos:13, files:["Pos13_0.jpg","Pos13_1.jpg"]},
+  {pos:14, files:["Pos14.jpg"]},
+  {pos:15, files:["Pos15.jpg"]},
+  {pos:16, files:["Pos16_0.jpg","Pos16_1.jpg"]},
+  {pos:17, files:["Pos17.jpg"]},
+  {pos:18, files:["Pos18_0.jpg","Pos18_1.jpg"]},
+  {pos:19, files:["Pos19_0.jpg","Pos19_1.jpg"]},
+  {pos:20, files:["Pos20.jpg"]},
+  {pos:21, files:["Pos21.jpg"]},
+  {pos:22, files:["Pos22_0.jpg","Pos22_1.jpg"]},
+  {pos:23, files:["Pos23_0.jpg","Pos23_1.jpg"]},
+  {pos:24, files:["Pos24_0.jpg","Pos24_1.jpg"]},
+  {pos:25, files:["Pos25_0.jpg","Pos25_1.jpg"]},
+  {pos:26, files:["Pos26_0.jpg","Pos26_1.jpg"]},
+  {pos:27, files:["Pos27_0.jpg","Pos27_1.jpg"]},
+  {pos:28, files:["Pos28_0.jpg","Pos28_1.jpg"]},
+  {pos:29, files:["Pos29_0.jpg","Pos29_1.jpg"]},
+  {pos:30, files:["Pos30.jpg"]},
+  {pos:31, files:["Pos31_0.jpg","Pos31_1.jpg"]},
+  {pos:32, files:["Pos32_0.jpg","Pos32_1.jpg","Pos32_2.jpg"]},
+  {pos:33, files:["Pos33_0.jpg","Pos33_1.jpg"]},
+  {pos:34, files:["Pos34_0.jpg","Pos34_1.jpg"]},
+  {pos:35, files:["Pos35_0.jpg","Pos35_1.jpg"]},
+  {pos:36, files:["Pos36_0.jpg","Pos36_1.jpg"]},
+  {pos:37, files:["Pos37_0.jpg","Pos37_1.jpg"]},
+  {pos:38, files:["Pos38_0.jpg","Pos38_1.jpg"]},
+  {pos:39, files:["Pos39_0.jpg","Pos39_1.jpg"]},
+  {pos:40, files:["Pos40_0.jpg","Pos40_1.jpg"]},
+  {pos:41, files:["Pos41_0.jpg","Pos41_1.jpg"]},
+  {pos:42, files:["Pos42_0.jpg","Pos42_1.jpg"]},
+  {pos:43, files:["Pos43_0.jpg","Pos43_1.jpg"]},
+  {pos:44, files:["Pos44_0.jpg","Pos44_1.jpg"]},
+  {pos:45, files:["Pos45_0.jpg","Pos45_1.jpg"]},
+  {pos:46, files:["Pos46_0.jpg","Pos46_1.jpg"]},
+  {pos:47, files:["Pos47_0.jpg","Pos47_1.jpg"]},
+  {pos:48, files:["Pos48_0.jpg","Pos48_1.jpg"]},
+  {pos:49, files:["Pos49_0.jpg","Pos49_1.jpg"]},
+  {pos:50, files:["Pos50.jpg"]},
+  {pos:51, files:["Pos51_0.jpg","Pos51_1.jpg","Pos51_2.jpg"]},
+  {pos:52, files:["Pos52_0.jpg","Pos52_1.jpg"]},
+  {pos:53, files:["Pos53.jpg"]},
+  {pos:54, files:["Pos54.jpg"]},
+  {pos:55, files:["Pos55.jpg"]},
+  {pos:56, files:["Pos56_0.jpg","Pos56_1.jpg"]},
+  {pos:57, files:["Pos57_0.jpg","Pos57_1.jpg"]},
+  {pos:58, files:["Pos58.jpg"]},
+  {pos:59, files:["Pos59_0.jpg","Pos59_1.jpg"]},
+  {pos:60, files:["Pos60_0.jpg","Pos60_1.jpg","Pos60_2.jpg"]},
+  {pos:61, files:["Pos61_0.jpg","Pos61_1.jpg"]},
+  {pos:62, files:["Pos62_0.jpg","Pos62_1.jpg"]},
+  {pos:63, files:["Pos63.jpg"]}
+];
+
+// Flatten to sequential list
+const allImages = [];
+imageData.forEach(p => {
+  p.files.forEach(f => allImages.push({ pos: p.pos, file: f }));
+});
+
+let currentIndex = 0;
+let scene, camera, renderer, sphere, sphereMaterial;
+let isUserInteracting = false;
+let lon = 0, lat = 0, onPointerDownLon = 0, onPointerDownLat = 0;
+let onPointerDownX = 0, onPointerDownY = 0;
+let phi = 0, theta = 0;
+let fov = 75;
+
+// Three.js setup
+function init() {
+  const container = document.getElementById('viewer');
+  scene = new THREE.Scene();
+  camera = new THREE.PerspectiveCamera(fov, window.innerWidth / window.innerHeight, 0.1, 1000);
+  camera.position.set(0, 0, 0.01);
+
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setPixelRatio(window.devicePixelRatio);
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  container.appendChild(renderer.domElement);
+
+  // Create sphere geometry (inverted for inside view)
+  const geometry = new THREE.SphereGeometry(500, 60, 40);
+  geometry.scale(-1, 1, 1); // Invert for inside
+
+  sphereMaterial = new THREE.MeshBasicMaterial({ color: 0x222222 });
+  sphere = new THREE.Mesh(geometry, sphereMaterial);
+  scene.add(sphere);
+
+  // Events
+  const canvas = renderer.domElement;
+  canvas.addEventListener('pointerdown', onPointerDown);
+  canvas.addEventListener('pointermove', onPointerMove);
+  canvas.addEventListener('pointerup', onPointerUp);
+  canvas.addEventListener('wheel', onWheel, { passive: false });
+
+  // Touch
+  canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+  canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+  canvas.addEventListener('touchend', onTouchEnd);
+
+  window.addEventListener('resize', onResize);
+
+  // Keyboard
+  document.addEventListener('keydown', onKeyDown);
+
+  buildSidebar();
+  loadImage(0);
+  animate();
+
+  // Hide hint after 3s
+  setTimeout(() => { document.getElementById('hint').style.opacity = '0'; }, 3000);
+}
+
+function onPointerDown(e) {
+  isUserInteracting = true;
+  onPointerDownX = e.clientX;
+  onPointerDownY = e.clientY;
+  onPointerDownLon = lon;
+  onPointerDownLat = lat;
+}
+
+function onPointerMove(e) {
+  if (!isUserInteracting) return;
+  lon = (onPointerDownX - e.clientX) * 0.15 + onPointerDownLon;
+  lat = (e.clientY - onPointerDownY) * 0.15 + onPointerDownLat;
+}
+
+function onPointerUp() { isUserInteracting = false; }
+
+let touchStartX, touchStartY;
+function onTouchStart(e) {
+  if (e.touches.length === 1) {
+    e.preventDefault();
+    touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
+    onPointerDownLon = lon;
+    onPointerDownLat = lat;
+    isUserInteracting = true;
+  }
+}
+function onTouchMove(e) {
+  if (e.touches.length === 1 && isUserInteracting) {
+    e.preventDefault();
+    lon = (touchStartX - e.touches[0].clientX) * 0.2 + onPointerDownLon;
+    lat = (e.touches[0].clientY - touchStartY) * 0.2 + onPointerDownLat;
+  }
+}
+function onTouchEnd() { isUserInteracting = false; }
+
+function onWheel(e) {
+  e.preventDefault();
+  fov = Math.max(30, Math.min(100, fov + e.deltaY * 0.05));
+  camera.fov = fov;
+  camera.updateProjectionMatrix();
+}
+
+function onResize() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+}
+
+function onKeyDown(e) {
+  if (e.key === 'ArrowRight' || e.key === 'n') nextImage();
+  else if (e.key === 'ArrowLeft' || e.key === 'p') prevImage();
+}
+
+function animate() {
+  requestAnimationFrame(animate);
+  lat = Math.max(-85, Math.min(85, lat));
+  phi = THREE.MathUtils.degToRad(90 - lat);
+  theta = THREE.MathUtils.degToRad(lon);
+  camera.lookAt(
+    500 * Math.sin(phi) * Math.cos(theta),
+    500 * Math.cos(phi),
+    500 * Math.sin(phi) * Math.sin(theta)
+  );
+  renderer.render(scene, camera);
+}
+
+function loadImage(index) {
+  currentIndex = index;
+  const img = allImages[index];
+  const loading = document.getElementById('loading');
+  loading.style.display = 'block';
+
+  const loader = new THREE.TextureLoader();
+  loader.load(img.file, function(texture) {
+    texture.mapping = THREE.EquirectangularReflectionMapping;
+    if (sphereMaterial.map) sphereMaterial.map.dispose();
+    sphereMaterial.map = texture;
+    sphereMaterial.color.set(0xffffff);
+    sphereMaterial.needsUpdate = true;
+    loading.style.display = 'none';
+
+    // Reset view
+    lon = 0; lat = 0; fov = 75;
+    camera.fov = fov;
+    camera.updateProjectionMatrix();
+  }, undefined, function() {
+    loading.style.display = 'none';
+    console.error('Failed to load:', img.file);
+  });
+
+  // Update UI
+  document.getElementById('info-pos').textContent = `Position ${img.pos}`;
+  document.getElementById('info-file').textContent = img.file;
+  document.getElementById('info-count').textContent = `${index + 1} / ${allImages.length}`;
+
+  // Update sidebar active states
+  document.querySelectorAll('.pos-header.active').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.pos-img-btn.active').forEach(el => el.classList.remove('active'));
+  const posHeader = document.querySelector(`[data-pos="${img.pos}"]`);
+  if (posHeader) {
+    posHeader.classList.add('active');
+    const imgsDiv = posHeader.nextElementSibling;
+    if (imgsDiv) {
+      imgsDiv.classList.add('open');
+      const btn = imgsDiv.querySelector(`[data-file="${img.file}"]`);
+      if (btn) btn.classList.add('active');
+    }
+    posHeader.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }
+}
+
+function nextImage() {
+  loadImage((currentIndex + 1) % allImages.length);
+}
+
+function prevImage() {
+  loadImage((currentIndex - 1 + allImages.length) % allImages.length);
+}
+
+function buildSidebar() {
+  const list = document.getElementById('pos-list');
+  imageData.forEach(p => {
+    const group = document.createElement('div');
+    group.className = 'pos-group';
+
+    const header = document.createElement('div');
+    header.className = 'pos-header';
+    header.dataset.pos = p.pos;
+    header.innerHTML = `<span>📍 Position ${p.pos}</span><span class="count">${p.files.length} foto${p.files.length > 1 ? 's' : ''}</span>`;
+    header.onclick = () => {
+      // Load first image of this position
+      const idx = allImages.findIndex(i => i.pos === p.pos);
+      if (idx >= 0) loadImage(idx);
+      // Toggle sub-list
+      const imgsDiv = header.nextElementSibling;
+      imgsDiv.classList.toggle('open');
+    };
+    group.appendChild(header);
+
+    const imgsDiv = document.createElement('div');
+    imgsDiv.className = 'pos-imgs';
+    p.files.forEach((f, fi) => {
+      const btn = document.createElement('button');
+      btn.className = 'pos-img-btn';
+      btn.dataset.file = f;
+      btn.textContent = p.files.length > 1 ? `Billede ${fi + 1} – ${f}` : f;
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const idx = allImages.findIndex(i => i.file === f);
+        if (idx >= 0) loadImage(idx);
+      };
+      imgsDiv.appendChild(btn);
+    });
+    group.appendChild(imgsDiv);
+    list.appendChild(group);
+  });
+}
+
+function toggleSidebar() {
+  const sb = document.getElementById('sidebar');
+  const btn = document.getElementById('toggle-sidebar');
+  sb.classList.toggle('hidden');
+  btn.classList.toggle('shifted');
+}
+
+init();
+</script>
+</body>
+</html>
